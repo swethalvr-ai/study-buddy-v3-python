@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Study Buddy</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div id="chat-container">
+    <h1><span id="title-icon" aria-hidden="true">📚</span> Study Buddy</h1>
+
+    <!-- Messages get added here as the conversation goes on -->
+    <div id="messages"></div>
+
+    <form id="chat-form">
+      <input
+        type="text"
+        id="user-input"
+        placeholder="Ask me a homework question..."
+        autocomplete="off"
+        required
+      >
+      <button type="submit" id="send-button" disabled>Send</button>
+    </form>
+  </div>
+
+  <script src="{{ url_for('static', filename='chat.js') }}"></script>
+</body>
+</html>
