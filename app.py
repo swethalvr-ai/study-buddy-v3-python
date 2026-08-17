@@ -244,15 +244,28 @@ def chat():
     The "messages" list is the full conversation so far (the Claude API
     is stateless, so we have to resend the whole history every time).
     """
-    data = request.get_json(force=True)
-    messages = data.get("messages", [])
+    data = request.get_json(force=True, silent=True) or {}
+    messages = data.get("messages")
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
+    if not isinstance(messages, list) or not messages:
+        return jsonify({"error": "No message to respond to."}), 400
+
+    last_message = messages[-1]
+    last_content = last_message.get("content") if isinstance(last_message, dict) else None
+    if not isinstance(last_content, str) or not last_content.strip():
+        return jsonify({"error": "No message to respond to."}), 400
+
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1024,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+        )
+    except Exception:
+        return jsonify(
+            {"error": "Study Buddy is having trouble responding right now. Please try again."}
+        ), 502
 
     # response.content is a list of content blocks; for a plain text
     # reply there's just one block with type "text".

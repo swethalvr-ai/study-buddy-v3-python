@@ -52,6 +52,11 @@ formEl.addEventListener("submit", async (event) => {
 
     const data = await response.json();
 
+    if (!response.ok) {
+      addMessageToPage("assistant", data.error || "Oops, something went wrong. Try again!");
+      return;
+    }
+
     addMessageToPage("assistant", data.reply);
     conversation.push({ role: "assistant", content: data.reply });
   } catch (error) {
