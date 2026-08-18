@@ -1,4 +1,3 @@
-
 # Study Buddy 📚 (Python / Flask rebuild)
 
 A Claude-powered homework tutor for kids aged 8–14 that teaches children
@@ -70,6 +69,9 @@ pip install -r requirements.txt
 
 **3. Add your API key**
 Create a `.env` file in the root:
+```
+ANTHROPIC_API_KEY=your-key-here
+```
 
 **4. Start the server**
 ```bash
