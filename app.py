@@ -20,7 +20,17 @@ from datetime import datetime, timezone
 
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from flask import Flask, Response, abort, jsonify, render_template, request, session
+from flask import (
+    Flask,
+    Response,
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 
 # Load variables from a local .env file (e.g. ANTHROPIC_API_KEY) into the
 # environment, so we don't have to export them manually every time.
@@ -421,6 +431,29 @@ def review():
         )
 
     return render_template("review.html", conversations=conversations)
+
+
+@app.route("/review/clear", methods=["POST"])
+def clear_review():
+    """
+    Deletes all logged conversations. Protected by the same credentials
+    as /review. Used to reset test data before a pilot starts, or to
+    clear real conversation logs afterward.
+    """
+    auth = request.authorization
+    if not _review_auth_ok(auth):
+        return Response(
+            "Login required.",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Study Buddy Review"'},
+        )
+
+    conn = get_db()
+    conn.execute("DELETE FROM messages")
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("review"))
 
 
 if __name__ == "__main__":

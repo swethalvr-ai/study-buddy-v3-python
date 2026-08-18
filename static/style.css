@@ -110,6 +110,15 @@ button:disabled {
   color: #718096;
 }
 
+.review-clear-button {
+  background: #e53e3e;
+  margin-bottom: 16px;
+}
+
+.review-clear-button:hover {
+  background: #c53030;
+}
+
 .review-conversation {
   border-bottom: 2px solid #ffe066;
   padding-bottom: 16px;

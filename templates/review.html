@@ -9,6 +9,13 @@
   <div id="chat-container" class="review-container">
     <h1><span aria-hidden="true">🔒</span> Session Review</h1>
 
+    {% if conversations %}
+      <form method="post" action="{{ url_for('clear_review') }}"
+            onsubmit="return confirm('Delete ALL logged conversations for every family? This cannot be undone.');">
+        <button type="submit" class="review-clear-button">Clear all logs</button>
+      </form>
+    {% endif %}
+
     {% if not conversations %}
       <p class="review-empty">No logged conversations yet.</p>
     {% endif %}
