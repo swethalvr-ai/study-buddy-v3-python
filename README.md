@@ -68,10 +68,14 @@ pip install -r requirements.txt
 ```
 
 **3. Add your API key**
-Create a `.env` file in the root:
+Copy `.env.example` to `.env` and fill in real values:
+```bash
+cp .env.example .env
 ```
-ANTHROPIC_API_KEY=your-key-here
-```
+At minimum you need `ANTHROPIC_API_KEY`. The other variables
+(`FLASK_SECRET_KEY`, `FAMILIES_JSON`, `REVIEW_USERNAME`/`REVIEW_PASSWORD`)
+are only needed for the pilot features below — see .env.example for
+what each one does.
 
 **4. Start the server**
 ```bash
@@ -126,12 +130,56 @@ My background in software test engineering — designing test frameworks,
 catching edge cases, documenting failure modes — maps directly onto
 prompt evaluation. This project is my proof of concept.
 
+## Pilot Mode
+
+Built for a small real-world pilot (3–5 families, 2-week opt-in trial) —
+no accounts or passwords needed at this scale.
+
+**Per-family links**
+Each family gets a private link like `/f/<token>` (e.g.
+`/f/sunshine-42`). Visiting it identifies which family is chatting and
+starts a freshly-logged conversation. The token → family name mapping
+lives in the `FAMILIES_JSON` environment variable — never in the repo,
+since real family names and tokens are personal data and this repo is
+public. Generate tokens with something like
+`python3 -c "import secrets; print(secrets.token_urlsafe(6))"`.
+
+**Session logging**
+Every message exchanged through a family's link is logged server-side
+(SQLite) with the family name, a conversation ID, role, content, and
+timestamp — logging is best-effort and wrapped so a logging failure
+never breaks the actual chat response.
+
+⚠️ On Render's free tier, disk is not guaranteed to persist across
+restarts/redeploys. Fine for a short pilot reviewed as it happens; not
+a permanent archive. For anything longer-running, move to a real
+database or Render's paid persistent disk.
+
+**Review page**
+`/review` shows all logged conversations grouped by family, password
+protected via `REVIEW_USERNAME`/`REVIEW_PASSWORD` env vars (fails
+closed — the page is inaccessible until both are set).
+
+## Deploying (Render)
+
+1. Push this repo to GitHub (already done).
+2. In Render, create a new Web Service from the GitHub repo.
+3. Build command: `pip install -r requirements.txt`
+   Start command: `gunicorn app:app` (the Flask dev server used for
+   local testing isn't meant for production — `gunicorn` is already
+   in `requirements.txt`).
+4. Set environment variables in Render's dashboard (not in git):
+   `ANTHROPIC_API_KEY`, `FLASK_SECRET_KEY`, `FAMILIES_JSON`,
+   `REVIEW_USERNAME`, `REVIEW_PASSWORD`.
+5. Deploy. Free tier spins down after 15 minutes idle — the first
+   request after a gap takes 30-50s to wake back up. Fine for a
+   pilot; upgrade to a paid instance if that cold start becomes an
+   issue for testers.
+
 ## What's next
 
-- Real-world pilot: 3–5 families, 2-week opt-in trial
-- Hosting/deployment so families don't need to run anything locally
-- Per-family unique links (no accounts/passwords needed at this scale)
-- Server-side session logging tied to family ID, with a private review page
 - v3+ agentic architecture: Safety Classifier → Router → Tutor, as a
   workflow (not a fully autonomous agent) — informed by Anthropic's
   "Building Effective Agents" guardrails-via-parallelization pattern
+- Publish full case study with pilot findings
+- Grade-level calibration (grades 3-4, 5-6, 7-8)

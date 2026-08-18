@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Study Buddy — Session Review</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div id="chat-container" class="review-container">
+    <h1><span aria-hidden="true">🔒</span> Session Review</h1>
+
+    {% if not conversations %}
+      <p class="review-empty">No logged conversations yet.</p>
+    {% endif %}
+
+    {% for (family_name, conversation_id), turns in conversations.items() %}
+      <div class="review-conversation">
+        <h2>{{ family_name }}</h2>
+        <p class="review-meta">
+          Conversation {{ conversation_id }} · started {{ turns[0].created_at }}
+        </p>
+        <div class="review-messages">
+          {% for turn in turns %}
+            <div class="message {{ turn.role }}">
+              <div class="review-timestamp">{{ turn.created_at }}</div>
+              {{ turn.content }}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</body>
+</html>

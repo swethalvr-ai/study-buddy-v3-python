@@ -1,16 +1,26 @@
 """
 Study Buddy - a simple homework tutor chatbot for kids, built with Flask.
 
-Two routes:
-  GET  /       -> serves the chat page
-  POST /chat   -> receives the conversation so far, calls Claude, returns the reply
+Routes:
+  GET  /            -> generic chat page (local/dev use, no family tracking)
+  GET  /f/<token>    -> per-family pilot entry point; sets session identity
+                        and starts a freshly-logged conversation
+  POST /chat        -> receives the conversation so far, calls Claude,
+                        returns the reply (and logs the turn if a family
+                        session is active)
+  GET  /review       -> password-protected page for reading back logged
+                        pilot conversations
 """
 
+import json
 import os
+import sqlite3
+import uuid
+from datetime import datetime, timezone
 
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, abort, jsonify, render_template, request, session
 
 # Load variables from a local .env file (e.g. ANTHROPIC_API_KEY) into the
 # environment, so we don't have to export them manually every time.
@@ -18,9 +28,75 @@ load_dotenv()
 
 app = Flask(__name__)
 
+# Needed to sign the session cookie that tracks which family is chatting
+# and which conversation their messages belong to. Set FLASK_SECRET_KEY
+# in production (Render env vars) - never commit a real secret to git.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-insecure-key-change-me")
+
 # The Anthropic() client reads the ANTHROPIC_API_KEY environment variable
 # automatically, so we don't have to pass the key in ourselves.
 client = Anthropic()
+
+# Where pilot session logs are stored. NOTE: on Render's free tier this
+# disk is not guaranteed to persist across restarts/redeploys - fine for
+# a short pilot where logs are reviewed as they come in, but not a
+# permanent store. See README for details.
+DB_PATH = os.environ.get("DB_PATH", "data.db")
+
+# FAMILIES_JSON maps a private, unguessable URL token to a human-readable
+# family name, e.g. {"sunshine-42": "The Martinez Family"}. This is set as
+# an environment variable (in .env locally, in Render's dashboard in
+# production) and is NEVER committed to git, since real family names and
+# tokens are personal data and this repo is public. See .env.example.
+try:
+    FAMILIES = json.loads(os.environ.get("FAMILIES_JSON", "{}"))
+except json.JSONDecodeError:
+    FAMILIES = {}
+
+
+def get_db():
+    """Open a connection and make sure the messages table exists."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            family_token TEXT NOT NULL,
+            family_name TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    return conn
+
+
+def log_message(family_token, family_name, conversation_id, role, content):
+    """
+    Best-effort session logging for the pilot. A logging failure should
+    never break the actual chat response, so any error here is swallowed.
+    """
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO messages "
+            "(family_token, family_name, conversation_id, role, content, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                family_token,
+                family_name,
+                conversation_id,
+                role,
+                content,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 SYSTEM_PROMPT = """You are Study Buddy, a friendly and encouraging homework helper for kids aged 8–14.
 
@@ -228,8 +304,27 @@ MODEL = "claude-opus-5"
 
 @app.route("/")
 def index():
-    """Serve the chat page."""
+    """Generic chat page for local development/testing (no family tracking)."""
     return render_template("chat.html")
+
+
+@app.route("/f/<token>")
+def family_chat(token):
+    """
+    Per-family entry point for the pilot. Each participating family gets
+    their own private link (e.g. /f/sunshine-42). Visiting it identifies
+    which family is chatting and starts a fresh logged conversation - no
+    account or password needed.
+    """
+    family_name = FAMILIES.get(token)
+    if not family_name:
+        abort(404)
+
+    session["family_token"] = token
+    session["family_name"] = family_name
+    session["conversation_id"] = str(uuid.uuid4())
+
+    return render_template("chat.html", family_name=family_name)
 
 
 @app.route("/chat", methods=["POST"])
@@ -242,7 +337,10 @@ def chat():
         { "messages": [ {"role": "user", "content": "..."}, ... ] }
 
     The "messages" list is the full conversation so far (the Claude API
-    is stateless, so we have to resend the whole history every time).
+    is stateless, so we have to resend the whole history every time). If
+    this request came in through a family's pilot link (/f/<token>), the
+    new turn (the child's message + Study Buddy's reply) is also logged
+    for later review.
     """
     data = request.get_json(force=True, silent=True) or {}
     messages = data.get("messages")
@@ -273,7 +371,56 @@ def chat():
         (block.text for block in response.content if block.type == "text"), ""
     )
 
+    family_token = session.get("family_token")
+    if family_token:
+        conversation_id = session.get("conversation_id", "unknown")
+        family_name = session.get("family_name", "unknown")
+        log_message(family_token, family_name, conversation_id, "user", last_content)
+        log_message(family_token, family_name, conversation_id, "assistant", reply_text)
+
     return jsonify({"reply": reply_text})
+
+
+def _review_auth_ok(auth):
+    expected_user = os.environ.get("REVIEW_USERNAME")
+    expected_pass = os.environ.get("REVIEW_PASSWORD")
+    if not expected_user or not expected_pass:
+        # Review page is disabled until credentials are configured -
+        # fail closed, not open.
+        return False
+    return bool(auth) and auth.username == expected_user and auth.password == expected_pass
+
+
+@app.route("/review")
+def review():
+    """
+    Password-protected page for reading back logged pilot conversations,
+    grouped by family and conversation. Requires REVIEW_USERNAME and
+    REVIEW_PASSWORD to be set as environment variables.
+    """
+    auth = request.authorization
+    if not _review_auth_ok(auth):
+        return Response(
+            "Login required.",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Study Buddy Review"'},
+        )
+
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT family_name, conversation_id, role, content, created_at "
+        "FROM messages ORDER BY family_name, conversation_id, created_at"
+    ).fetchall()
+    conn.close()
+
+    conversations = {}
+    for family_name, conversation_id, role, content, created_at in rows:
+        key = (family_name, conversation_id)
+        conversations.setdefault(key, []).append(
+            {"role": role, "content": content, "created_at": created_at}
+        )
+
+    return render_template("review.html", conversations=conversations)
 
 
 if __name__ == "__main__":

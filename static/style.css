@@ -94,3 +94,46 @@ button:disabled {
   background: #c1c8cd;
   cursor: not-allowed;
 }
+
+#family-badge {
+  font-size: 0.6em;
+  color: #718096;
+  font-weight: normal;
+}
+
+.review-container {
+  max-width: 100%;
+}
+
+.review-empty {
+  text-align: center;
+  color: #718096;
+}
+
+.review-conversation {
+  border-bottom: 2px solid #ffe066;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+}
+
+.review-conversation h2 {
+  color: #2f855a;
+  margin-bottom: 2px;
+}
+
+.review-meta {
+  font-size: 0.85em;
+  color: #718096;
+  margin-top: 0;
+}
+
+.review-messages {
+  display: flex;
+  flex-direction: column;
+}
+
+.review-timestamp {
+  font-size: 0.7em;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
