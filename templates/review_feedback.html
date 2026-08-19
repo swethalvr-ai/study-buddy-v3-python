@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Study Buddy — Feedback Review</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div id="chat-container" class="review-container">
+    <h1><span aria-hidden="true">🔒</span> Feedback Review</h1>
+
+    <p class="review-nav"><a href="{{ url_for('review') }}">← View conversations</a></p>
+
+    {% if responses %}
+      <form method="post" action="{{ url_for('clear_feedback') }}"
+            onsubmit="return confirm('Delete ALL submitted feedback for every family? This cannot be undone.');">
+        <button type="submit" class="review-clear-button">Clear all feedback</button>
+      </form>
+    {% endif %}
+
+    {% if not responses %}
+      <p class="review-empty">No feedback submitted yet.</p>
+    {% endif %}
+
+    {% for family_name, answers in responses.items() %}
+      <div class="review-conversation">
+        <h2>{{ family_name }}</h2>
+        <p class="review-meta">Submitted {{ answers[0].submitted_at }}</p>
+        <div class="feedback-answers">
+          {% for item in answers %}
+            <div class="feedback-answer">
+              <div class="feedback-answer-question">{{ item.question }}</div>
+              <div class="feedback-answer-value">{{ item.answer }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</body>
+</html>

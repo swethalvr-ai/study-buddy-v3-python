@@ -10,6 +10,10 @@ Routes:
                         session is active)
   GET  /review       -> password-protected page for reading back logged
                         pilot conversations
+  GET/POST /feedback/<token> -> end-of-pilot feedback form for a family,
+                        reuses their existing token
+  GET  /review/feedback -> password-protected page for reading back
+                        submitted feedback
 """
 
 import json
@@ -65,7 +69,7 @@ except json.JSONDecodeError:
 
 
 def get_db():
-    """Open a connection and make sure the messages table exists."""
+    """Open a connection and make sure the messages/feedback tables exist."""
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         """
@@ -80,7 +84,106 @@ def get_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            family_token TEXT NOT NULL,
+            family_name TEXT NOT NULL,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            submitted_at TEXT NOT NULL
+        )
+        """
+    )
     return conn
+
+
+# The end-of-pilot feedback survey. Each question is stored as its own
+# row when submitted (family, question, answer) rather than one wide
+# table, so the question set can change over time without a migration.
+FEEDBACK_QUESTIONS = [
+    {
+        "key": "usage_count",
+        "text": "How many times did your family use Study Buddy during the pilot?",
+        "type": "radio",
+        "options": ["Not at all", "1-3 times", "4-6 times", "7+ times"],
+        "required": True,
+    },
+    {
+        "key": "overall_rating",
+        "text": "Overall, how would you rate the experience?",
+        "type": "radio",
+        "options": ["1 - Not helpful", "2", "3", "4", "5 - Very helpful"],
+        "required": True,
+    },
+    {
+        "key": "engagement",
+        "text": "Did Study Buddy help your child engage more with their homework, less, or about the same?",
+        "type": "radio",
+        "options": ["More", "Less", "About the same", "Not sure"],
+        "required": False,
+    },
+    {
+        "key": "frustration",
+        "text": "Did your child ever seem frustrated that Study Buddy wouldn't just give them the answer?",
+        "type": "radio",
+        "options": ["Yes, often", "Sometimes", "Rarely", "Never"],
+        "required": False,
+    },
+    {
+        "key": "read_faq",
+        "text": "Did you review the FAQ or safety information before letting your child use it?",
+        "type": "radio",
+        "options": ["Yes", "No", "Skimmed it"],
+        "required": False,
+    },
+    {
+        "key": "concern_yn",
+        "text": "Did anything happen during a conversation that concerned you?",
+        "type": "radio",
+        "options": ["Yes", "No"],
+        "required": True,
+    },
+    {
+        "key": "concern_detail",
+        "text": "If yes, please describe:",
+        "type": "textarea",
+        "required": False,
+    },
+    {
+        "key": "worked_well",
+        "text": "What's one thing that worked really well?",
+        "type": "textarea",
+        "required": False,
+    },
+    {
+        "key": "improve",
+        "text": "What's one thing you'd change or improve?",
+        "type": "textarea",
+        "required": False,
+    },
+    {
+        "key": "continue_using",
+        "text": "Would you want your family to keep using Study Buddy after this pilot?",
+        "type": "radio",
+        "options": ["Yes", "No", "Maybe"],
+        "required": True,
+    },
+    {
+        "key": "recommend",
+        "text": "Would you recommend this to another family?",
+        "type": "radio",
+        "options": ["Yes", "No", "Maybe"],
+        "required": True,
+    },
+    {
+        "key": "other",
+        "text": "Anything else you'd like to share?",
+        "type": "textarea",
+        "required": False,
+    },
+]
 
 
 def log_message(family_token, family_name, conversation_id, role, content):
@@ -431,6 +534,108 @@ def review():
         )
 
     return render_template("review.html", conversations=conversations)
+
+
+@app.route("/feedback/<token>", methods=["GET", "POST"])
+def feedback(token):
+    """
+    End-of-pilot feedback form for a family. Reuses the same private
+    token as their /f/<token> chat link - no new link to send out.
+    """
+    family_name = FAMILIES.get(token)
+    if not family_name:
+        abort(404)
+
+    if request.method == "POST":
+        errors = []
+        answers = {}
+        for question in FEEDBACK_QUESTIONS:
+            value = request.form.get(question["key"], "").strip()
+            answers[question["key"]] = value
+            if question["required"] and not value:
+                errors.append(question["text"])
+
+        if errors:
+            return render_template(
+                "feedback.html",
+                family_name=family_name,
+                questions=FEEDBACK_QUESTIONS,
+                errors=errors,
+                answers=answers,
+            )
+
+        submitted_at = datetime.now(timezone.utc).isoformat()
+        conn = get_db()
+        for question in FEEDBACK_QUESTIONS:
+            value = answers.get(question["key"], "")
+            if value:
+                conn.execute(
+                    "INSERT INTO feedback "
+                    "(family_token, family_name, question, answer, submitted_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (token, family_name, question["text"], value, submitted_at),
+                )
+        conn.commit()
+        conn.close()
+
+        return render_template("feedback_thanks.html", family_name=family_name)
+
+    return render_template(
+        "feedback.html",
+        family_name=family_name,
+        questions=FEEDBACK_QUESTIONS,
+        errors=[],
+        answers={},
+    )
+
+
+@app.route("/review/feedback")
+def review_feedback():
+    """
+    Password-protected page for reading back submitted feedback,
+    grouped by family. Requires the same credentials as /review.
+    """
+    auth = request.authorization
+    if not _review_auth_ok(auth):
+        return Response(
+            "Login required.",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Study Buddy Review"'},
+        )
+
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT family_name, question, answer, submitted_at "
+        "FROM feedback ORDER BY family_name, submitted_at"
+    ).fetchall()
+    conn.close()
+
+    responses = {}
+    for family_name, question, answer, submitted_at in rows:
+        responses.setdefault(family_name, []).append(
+            {"question": question, "answer": answer, "submitted_at": submitted_at}
+        )
+
+    return render_template("review_feedback.html", responses=responses)
+
+
+@app.route("/review/feedback/clear", methods=["POST"])
+def clear_feedback():
+    """Deletes all submitted feedback. Protected by the same credentials as /review."""
+    auth = request.authorization
+    if not _review_auth_ok(auth):
+        return Response(
+            "Login required.",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Study Buddy Review"'},
+        )
+
+    conn = get_db()
+    conn.execute("DELETE FROM feedback")
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("review_feedback"))
 
 
 @app.route("/review/clear", methods=["POST"])

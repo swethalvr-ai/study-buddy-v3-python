@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Study Buddy — Feedback</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div id="chat-container" class="review-container">
+    <h1><span aria-hidden="true">🐝</span> Study Buddy Feedback — {{ family_name }}</h1>
+    <p class="review-meta">
+      Thanks for trying the pilot! This takes about 2 minutes. Questions
+      marked * are required — everything else is optional.
+    </p>
+
+    {% if errors %}
+      <div class="feedback-errors">
+        <p>Please answer the following before submitting:</p>
+        <ul>
+          {% for error in errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <form method="post" class="feedback-form">
+      {% for question in questions %}
+        <div class="feedback-question">
+          <label class="feedback-label">
+            {{ question.text }}{% if question.required %} *{% endif %}
+          </label>
+
+          {% if question.type == "radio" %}
+            {% for option in question.options %}
+              <label class="feedback-option">
+                <input
+                  type="radio"
+                  name="{{ question.key }}"
+                  value="{{ option }}"
+                  {% if answers.get(question.key) == option %}checked{% endif %}
+                >
+                {{ option }}
+              </label>
+            {% endfor %}
+          {% elif question.type == "textarea" %}
+            <textarea name="{{ question.key }}" rows="3">{{ answers.get(question.key, "") }}</textarea>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      <button type="submit">Submit feedback</button>
+    </form>
+  </div>
+</body>
+</html>
